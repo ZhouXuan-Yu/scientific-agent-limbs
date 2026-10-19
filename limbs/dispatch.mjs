@@ -133,7 +133,13 @@ if (via === "bot") {
   );
 
   const chiefBaseline = maxTurn(chief);
-  const brief = `读取文件 ${specPath} 并按其中内容执行。产物写进 ${botOutDir}，完成后在回复里列出写了哪些文件、哪条验收标准存疑。`;
+  // 团队分派是显式要求：不写清楚，Chief 会自己一个人干完。
+  // 2026-10-19 实测：只写「读文件并执行」，它真的独干了，团队里没有痕迹。
+  const brief =
+    `读取文件 ${specPath} 并按其中内容执行。产物写进 ${botOutDir}。\n\n` +
+    `这是团队任务。先判断由谁执行最合适：需要分派时用 message_bot 把任务交给对应成员，并在回复里写明分工理由；` +
+    `如果判断由你自己完成更合适，也要在回复里说明理由。不要无说明地全部自己做。\n\n` +
+    `完成后在回复里列出写了哪些文件、哪条验收标准存疑。`;
 
   await submit(chief, brief);
   patchTask(taskId, { lastDispatchedAt: new Date().toISOString(), dispatchToken });
