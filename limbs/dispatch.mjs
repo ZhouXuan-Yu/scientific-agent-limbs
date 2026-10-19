@@ -100,13 +100,17 @@ const t0 = Date.now();
  * 为什么这么绕：ds-bot 的群聊消息走插件私有通道，外部 RPC 投不进去（2026-10-19 三条路实测均不通）；
  * 但 Chief 的 session 本身能收外部 prompt，且它能读自己 workspace 里的文件。
  * 代价：任务记录不会出现在群聊界面，只出现在 Chief 的会话里。 */
-const via = String(arg("via", "new"));
-if (via === "bot") {
+const via = String(arg("via", "new")); // room | bot | new
+if (via === "room" || via === "bot") {
   const botCfg = config().bot || {};
   const botWs = botCfg.workspace;
   const chief = botCfg.chiefSessionId;
-  if (!botWs || !chief) {
-    out({ error: "--via bot requires bot.workspace and bot.chiefSessionId in config.json" });
+  const room = botCfg.roomSessionId;
+  // room：投群聊会话，消息会写进 rooms[].log，界面可见，Chief 按团队规则接单。
+  // bot ：投 Chief 私聊，不经群聊。两者都等 Chief 的 turn/end。
+  const target = via === "room" ? room : chief;
+  if (!botWs || !chief || !target) {
+    out({ error: `--via ${via} requires bot.workspace, bot.chiefSessionId${via === "room" ? " and bot.roomSessionId" : ""}` });
     process.exit(2);
   }
 
@@ -135,21 +139,25 @@ if (via === "bot") {
   const chiefBaseline = maxTurn(chief);
   // 团队分派是显式要求：不写清楚，Chief 会自己一个人干完。
   // 2026-10-19 实测：只写「读文件并执行」，它真的独干了，团队里没有痕迹。
+  const teamLine =
+    `这是团队任务，请按团队规则处理：判断由谁执行最合适，说明分工理由；` +
+    `需要分派时交给对应成员，不需分派则说明理由。不要无说明地全部自己做。`;
   const brief =
-    `读取文件 ${specPath} 并按其中内容执行。产物写进 ${botOutDir}。\n\n` +
-    `这是团队任务。先判断由谁执行最合适：需要分派时用 message_bot 把任务交给对应成员，并在回复里写明分工理由；` +
-    `如果判断由你自己完成更合适，也要在回复里说明理由。不要无说明地全部自己做。\n\n` +
-    `完成后在回复里列出写了哪些文件、哪条验收标准存疑。`;
+    via === "room"
+      ? `[任务单 ${taskId}] ${task.title}\n\n目标：${task.goal}\n\n验收标准：\n` +
+        task.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n") +
+        `\n\n产物目录：${botOutDir}\n\n${teamLine}\n\n完成后把结果回报到群里。`
+      : `读取文件 ${specPath} 并按其中内容执行。产物写进 ${botOutDir}。\n\n${teamLine}\n\n完成后在回复里列出写了哪些文件、哪条验收标准存疑。`;
 
-  await submit(chief, brief);
+  await submit(target, brief);
   patchTask(taskId, { lastDispatchedAt: new Date().toISOString(), dispatchToken });
   if (task.state === "queued") {
-    setState(taskId, "dispatched", { sessionId: chief, note: `dispatch via bot -> ${chief}` });
+    setState(taskId, "dispatched", { sessionId: target, note: `dispatch via ${via} -> ${target}` });
   }
-  audit("dispatch", "submit-bot", {
+  audit("dispatch", `submit-${via}`, {
     target: taskId,
     ok: true,
-    detail: { chiefSession: chief, specPath, briefChars: brief.length, token: dispatchToken },
+    detail: { deliveryTarget: target, chiefSession: chief, specPath, briefChars: brief.length, token: dispatchToken },
   });
 
   const botDeadline = Date.now() + timeoutSec * 1000;

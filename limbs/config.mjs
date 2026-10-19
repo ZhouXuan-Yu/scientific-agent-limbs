@@ -43,9 +43,11 @@ const DEFAULTS = {
     model: "deepseek-flash",
   },
   bot: {
-    // ds-bot 的 Bot 团队工作目录。任务文件放这里，Bot 能直接读到。
+    // ds-bot 的 Bot 团队工作目录。产物落在这一侧，完成后需要回收。
     workspace: join(APPDATA, "dsh-desktop", "harness", "bot", "workspace"),
-    // 团队负责人（Main Bot）的 session。投一条极简指令就能触发它干活。
+    // 群聊会话。投 prompt 到这个 session 会写进 rooms[].log，即群聊界面可见。
+    roomSessionId: null,
+    // 团队负责人（Main Bot）的 session。两种投递模式都等它的 turn/end。
     chiefSessionId: null,
   },
   paths: {
@@ -114,6 +116,7 @@ export function config() {
     },
     bot: {
       workspace: process.env.BOT_WORKSPACE || merged.bot?.workspace || join(APPDATA, "dsh-desktop", "harness", "bot", "workspace"),
+      roomSessionId: process.env.BOT_ROOM_SESSION || merged.bot?.roomSessionId || null,
       chiefSessionId: process.env.BOT_CHIEF_SESSION || merged.bot?.chiefSessionId || null,
     },
     configPath,
