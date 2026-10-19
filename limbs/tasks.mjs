@@ -27,7 +27,7 @@ const WORKSPACE = C.workspace;
 
 export const ROOT = config().paths.tasks;
 export const STATES = ["queued", "dispatched", "running", "done", "failed", "cancelled"];
-export const LIMBS = ["dsh", "local", "zotero"];
+export const LIMBS = ["dsh", "local", "zotero", "bot"];
 
 const TRANSITIONS = {
   queued: ["dispatched", "cancelled"],

@@ -16,7 +16,7 @@
  * 退出码：0 = 收到回报；1 = 超时未收到；2 = 参数或状态错误
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
 import {
   rpc,
   submit,
@@ -26,7 +26,6 @@ import {
 import { load, setState, render, patchTask } from "./tasks.mjs";
 import { audit } from "./audit.mjs";
 import { randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.mjs";
 import { turnEnds } from "./events.mjs";
@@ -95,6 +94,119 @@ if (!force && task.lastDispatchedAt) {
 const dispatchToken = randomBytes(8).toString("hex");
 
 const t0 = Date.now();
+
+/* 0. 经 ds-bot 团队（--via bot）
+ * 机制：把任务写成一个 JSON 放进 Bot 的工作目录，再往 Chief 的 session 投一条极简指令让它去读。
+ * 为什么这么绕：ds-bot 的群聊消息走插件私有通道，外部 RPC 投不进去（2026-10-19 三条路实测均不通）；
+ * 但 Chief 的 session 本身能收外部 prompt，且它能读自己 workspace 里的文件。
+ * 代价：任务记录不会出现在群聊界面，只出现在 Chief 的会话里。 */
+const via = String(arg("via", "new"));
+if (via === "bot") {
+  const botCfg = config().bot || {};
+  const botWs = botCfg.workspace;
+  const chief = botCfg.chiefSessionId;
+  if (!botWs || !chief) {
+    out({ error: "--via bot requires bot.workspace and bot.chiefSessionId in config.json" });
+    process.exit(2);
+  }
+
+  const specPath = join(botWs, "tasks", `${taskId}.json`);
+  const botOutDir = join(botWs, "tasks", taskId);
+  mkdirSync(botOutDir, { recursive: true });
+  writeFileSync(
+    specPath,
+    JSON.stringify(
+      {
+        id: taskId,
+        title: task.title,
+        goal: task.goal,
+        acceptance: task.acceptance,
+        deliverTo: botOutDir,
+        boundary:
+          "按 goal 与 acceptance 执行。产物一律写进 deliverTo 目录。不要修改任何 Bot 的设置，不要创建或删除 Bot。" +
+          "无法完成或有歧义时停下来在回复里说明，不要猜。",
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
+
+  const chiefBaseline = maxTurn(chief);
+  const brief = `读取文件 ${specPath} 并按其中内容执行。产物写进 ${botOutDir}，完成后在回复里列出写了哪些文件、哪条验收标准存疑。`;
+
+  await submit(chief, brief);
+  patchTask(taskId, { lastDispatchedAt: new Date().toISOString(), dispatchToken });
+  if (task.state === "queued") {
+    setState(taskId, "dispatched", { sessionId: chief, note: `dispatch via bot -> ${chief}` });
+  }
+  audit("dispatch", "submit-bot", {
+    target: taskId,
+    ok: true,
+    detail: { chiefSession: chief, specPath, briefChars: brief.length, token: dispatchToken },
+  });
+
+  const botDeadline = Date.now() + timeoutSec * 1000;
+  let botHit = null;
+  while (Date.now() < botDeadline) {
+    await new Promise((r) => setTimeout(r, pollMs));
+    const fresh = turnEnds({ sessions: [chief] }).filter((e) => (Number(e.turn) || 0) > chiefBaseline);
+    if (fresh.length) {
+      botHit = fresh[fresh.length - 1];
+      break;
+    }
+  }
+
+  const botElapsed = Date.now() - t0;
+  if (!botHit) {
+    try {
+      setState(taskId, "failed", {
+        failure: `bot dispatch: no turn/end within ${timeoutSec}s (chief ${chief})`,
+        note: "auto-failed by dispatch timeout",
+      });
+    } catch {
+      /* 状态可能不允许迁移 */
+    }
+    audit("dispatch", "timeout-bot", { target: taskId, ok: false, ms: botElapsed, detail: { chief } });
+    out({ taskId, phase: "timeout", via: "bot", sessionId: chief, elapsedMs: botElapsed });
+    process.exit(1);
+  }
+
+  // 回收：Bot 写在自己的 workspace，得搬回工作区任务目录，否则 sync 扫不到。
+  let recoveredFiles = 0;
+  const localDir = join(config().paths.tasks, taskId);
+  if (existsSync(botOutDir)) {
+    mkdirSync(localDir, { recursive: true });
+    try {
+      cpSync(botOutDir, localDir, { recursive: true, force: true });
+      recoveredFiles = readdirSync(localDir, { withFileTypes: true }).filter((d) => d.isFile()).length;
+    } catch (ex) {
+      audit("dispatch", "recover-failed", { target: taskId, ok: false, error: String(ex?.message || ex) });
+    }
+  }
+
+  setState(taskId, "running", { sessionId: chief, note: `bot turn ${botHit.turn} completed in ${botElapsed}ms` });
+  audit("dispatch", "complete-bot", {
+    target: taskId,
+    ok: true,
+    ms: botElapsed,
+    detail: { turn: botHit.turn, recoveredFiles },
+  });
+
+  out({
+    taskId,
+    phase: "returned",
+    via: "bot",
+    sessionId: chief,
+    turn: botHit.turn,
+    elapsedMs: botElapsed,
+    text: botHit.text,
+    botOutDir,
+    recoveredFiles,
+    next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",
+  });
+  process.exit(0);
+}
 
 /* 1. 会话 */
 let sid = arg("session");

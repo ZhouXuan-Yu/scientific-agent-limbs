@@ -42,6 +42,12 @@ const DEFAULTS = {
     provider: "deepseek-official",
     model: "deepseek-flash",
   },
+  bot: {
+    // ds-bot 的 Bot 团队工作目录。任务文件放这里，Bot 能直接读到。
+    workspace: join(APPDATA, "dsh-desktop", "harness", "bot", "workspace"),
+    // 团队负责人（Main Bot）的 session。投一条极简指令就能触发它干活。
+    chiefSessionId: null,
+  },
   paths: {
     tasks: "tasks",
     audit: "limbs/_audit",
@@ -105,6 +111,10 @@ export function config() {
       bridgeLogPath: process.env.HANA_BRIDGE_LOG || merged.dsh.bridgeLogPath,
       provider: merged.dsh.provider,
       model: merged.dsh.model,
+    },
+    bot: {
+      workspace: process.env.BOT_WORKSPACE || merged.bot?.workspace || join(APPDATA, "dsh-desktop", "harness", "bot", "workspace"),
+      chiefSessionId: process.env.BOT_CHIEF_SESSION || merged.bot?.chiefSessionId || null,
     },
     configPath,
     loadedFromFile: existsSync(configPath),

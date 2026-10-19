@@ -17,6 +17,12 @@
     "model": "deepseek-flash"
   },
 
+  "bot": {
+    "_comment": "仅在使用 dispatch --via bot 时需要。ds-bot 的群聊不接外部消息，任务靠文件 + Chief session 转发。",
+    "workspace": "C:/Users/YOU/AppData/Roaming/dsh-desktop/harness/bot/workspace",
+    "chiefSessionId": null
+  },
+
   "paths": {
     "tasks": "tasks",
     "audit": "limbs/_audit",

@@ -107,6 +107,7 @@ node limbs/inbox.mjs --all --json                 # 全部历史，机器可读
 node limbs/inbox.mjs --reset                      # 丢弃积压，偏移归零到末尾
 node limbs/wait-turn.mjs --session session-xxx --timeout 600   # 阻塞等下一轮结束
 node limbs/dispatch.mjs --task T... --timeout 600  # 任务单一条命令下发并等回报
+node limbs/dispatch.mjs --task T... --via bot      # 经 ds-bot 团队（Chief）执行
 node limbs/daemon.mjs --once                      # 跑一轮状态守护
 node limbs/daemon.mjs --report                    # 只看摘要（进场先看这个）
 node limbs/daemon.mjs --interval 60               # 常驻（Ctrl-C 退）
@@ -130,6 +131,27 @@ node limbs/config.mjs                             # 打印解析后的配置 + �
 退出码：`0` 两端都通，`1` 有任意一端不通。
 
 环境变量：`ZOTERO_EXE`、`ZOTERO_PORT`、`ZOTERO_NO_AUTOSTART=1`、`ZOTERO_START_TIMEOUT_MS`、`DSH_NO_AUTOSTART=1`、`HANA_BRIDGE_LOG`。
+
+## 经 ds-bot 团队下发
+
+`dispatch --via bot` 走的是另一条路。先搞清楚一件事实：
+
+**ds-bot 的群聊消息走插件私有通道，外部 RPC 投不进去。** 2026-10-19 实测三条都不通：
+往 room 会话 `科研论文组` 投 prompt、往 Chief 的私聊会话投、往 `Chief · 科研论文组` 那份隐藏会话投。
+三者都返回 `accepted: true`，但 ds-bot 的 `state.json` 里 exchanges 数量一条没变。
+
+但 Chief 的 session 本身能收外部 prompt，且它能读自己 workspace 里的文件。所以走第四条：
+
+1. 任务写成 JSON 放进 `<bot.workspace>/tasks/<id>.json`
+2. 往 Chief 的 session 投一句：「读取该文件并执行，产物写进 `<bot.workspace>/tasks/<id>/`」
+3. 等 Chief 的 `turn/end`
+4. 把产物从 Bot workspace 回收回工作区任务目录，否则 `sync` 扫不到
+
+实测（2026-10-19）：30.3 秒完成第一轮。中途因某个 Bot 缺 role 字段，Chief 主动停下询问而不是编造，补充确认后 48.2 秒完成。
+
+**代价必须说清**：任务记录不会出现在群聊界面，只会出现在 Chief 的会话里。想在群聊看到，只能人工发一次。
+
+配置项见 `config.json` 的 `bot.workspace` 与 `bot.chiefSessionId`。
 
 ## 完成信号
 
