@@ -407,6 +407,52 @@ export async function collections({ limit = 100 } = {}) {
   }));
 }
 
+/**
+ * 单个分类的真实统计。
+ *
+ * 为什么要先验 key：Zotero 本地 API 对不存在的 collection key **不返回 404**，
+ * 而是静默返回全库条目。2026-10-19 小研实测：错误 key 的 /items/top 返回 55，
+ * 而全库基线正是 55。数字看着正常，它却不是任何分类的规模。
+ * 只有 /collections/<key> 本身才真 404。
+ *
+ * 两种口径都给：
+ *   numItems / topItems  真正的文献条目数，不含附件、笔记、注释
+ *   allObjects           含子条目的对象总数（/items 会连附件一起返回）
+ */
+export async function collectionStats(key) {
+  const run = await ensureRunning();
+  if (!run.running) throw new Error(run.note || "Zotero not running");
+  if (!key || typeof key !== "string") throw new Error("collectionStats needs a key");
+
+  const meta = await api(`/api/users/0/collections/${key}`);
+  if (!meta.ok) {
+    throw new Error(`collection ${key} not found (HTTP ${meta.status}) — refusing to guess; a bad key would silently return the whole library`);
+  }
+  const name = meta.json?.data?.name ?? null;
+  const numItems = meta.json?.meta?.numItems ?? null;
+
+  const top = await api(`/api/users/0/collections/${key}/items/top?limit=1`);
+  const all = await api(`/api/users/0/collections/${key}/items?limit=1`);
+  const topItems = Number(top.headers.get("total-results") || 0);
+  const allObjects = Number(all.headers.get("total-results") || 0);
+
+  const out = {
+    key,
+    name,
+    numItems,
+    topItems,
+    allObjects,
+    consistent: numItems !== null && numItems === topItems,
+  };
+  audit("zotero-core", "collectionStats", {
+    target: key,
+    ok: out.consistent,
+    detail: { name, numItems, topItems, allObjects },
+    error: out.consistent ? null : "meta.numItems does not match /items/top Total-Results",
+  });
+  return out;
+}
+
 /* --------------------------- CLI --------------------------- */
 
 function out(obj) {

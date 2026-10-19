@@ -29,6 +29,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { config } from "./config.mjs";
 import { turnEnds } from "./events.mjs";
+import { roomState, waitQuiet } from "./botstate.mjs";
 
 function arg(name, dflt) {
   for (const flag of [`--${name}`, `-${name}`]) {
@@ -136,6 +137,10 @@ if (via === "room" || via === "bot") {
     "utf8",
   );
 
+  const isRoom = via === "room";
+  // 投递前记下群聊 seq，用于判断这期间团队新增了哪些条目。
+  const roomSince = isRoom ? roomState(room).seq : 0;
+
   const chiefBaseline = maxTurn(chief);
   // 团队分派是显式要求：不写清楚，Chief 会自己一个人干完。
   // 2026-10-19 实测：只写「读文件并执行」，它真的独干了，团队里没有痕迹。
@@ -157,17 +162,34 @@ if (via === "room" || via === "bot") {
   audit("dispatch", `submit-${via}`, {
     target: taskId,
     ok: true,
-    detail: { deliveryTarget: target, chiefSession: chief, specPath, briefChars: brief.length, token: dispatchToken },
+    detail: { deliveryTarget: target, chiefSession: chief, specPath, briefChars: brief.length, token: dispatchToken, roomSeqBefore: roomSince },
   });
 
-  const botDeadline = Date.now() + timeoutSec * 1000;
   let botHit = null;
-  while (Date.now() < botDeadline) {
-    await new Promise((r) => setTimeout(r, pollMs));
-    const fresh = turnEnds({ sessions: [chief] }).filter((e) => (Number(e.turn) || 0) > chiefBaseline);
-    if (fresh.length) {
-      botHit = fresh[fresh.length - 1];
-      break;
+  let roomEntries = [];
+
+  if (isRoom) {
+    // 团队任务有多轮：接单、派单、成员执行、复核。
+    // 等第一个 turn/end 只能捕到开头，所以改成等「群聊安静」。
+    const q = await waitQuiet(room, roomSince, { quietMs: 90000, timeoutMs: timeoutSec * 1000 });
+    roomEntries = q.entries || [];
+    botHit = {
+      turn: null,
+      at: new Date().toISOString(),
+      quiet: q.quiet,
+      text: q.quiet
+        ? `room settled after ${q.waitedMs}ms, ${roomEntries.length} new entries`
+        : `room still active after ${q.waitedMs}ms, ${roomEntries.length} new entries`,
+    };
+  } else {
+    const botDeadline = Date.now() + timeoutSec * 1000;
+    while (Date.now() < botDeadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      const fresh = turnEnds({ sessions: [chief] }).filter((e) => (Number(e.turn) || 0) > chiefBaseline);
+      if (fresh.length) {
+        botHit = fresh[fresh.length - 1];
+        break;
+      }
     }
   }
 
@@ -210,11 +232,12 @@ if (via === "room" || via === "bot") {
   out({
     taskId,
     phase: "returned",
-    via: "bot",
-    sessionId: chief,
+    via,
+    sessionId: target,
     turn: botHit.turn,
     elapsedMs: botElapsed,
     text: botHit.text,
+    ...(isRoom ? { roomEntries } : {}),
     botOutDir,
     recoveredFiles,
     next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",
