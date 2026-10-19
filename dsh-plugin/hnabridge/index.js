@@ -24,16 +24,28 @@ import { dirname, join } from "node:path";
 export const name = "hana-bridge";
 export const inject = [];
 
-const OUT =
-  process.env.HANA_BRIDGE_OUT ||
-  join(process.env.APPDATA || "", "dsh-desktop", "harness", "logs", "hana-bridge-events.jsonl");
+const OUT_DIR =
+  process.env.HANA_BRIDGE_OUT_DIR || join(process.env.APPDATA || "", "dsh-desktop", "harness", "logs");
+
+/**
+ * 按天分片：hana-bridge-events-YYYYMMDD.jsonl。
+ * 单一文件会被五十多个会话的事件无限撑大，读取方每次都要读全文。
+ * HANA_BRIDGE_OUT 仍可强制写到单文件，仅供调试。
+ */
+function outPath() {
+  if (process.env.HANA_BRIDGE_OUT) return process.env.HANA_BRIDGE_OUT;
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  return join(OUT_DIR, `hana-bridge-events-${stamp}.jsonl`);
+}
 
 const SAMPLE_LIMIT = 3;
 
 function write(obj) {
   try {
-    mkdirSync(dirname(OUT), { recursive: true });
-    appendFileSync(OUT, JSON.stringify(obj) + "\n", "utf8");
+    const p = outPath();
+    mkdirSync(dirname(p), { recursive: true });
+    appendFileSync(p, JSON.stringify(obj) + "\n", "utf8");
   } catch {
     /* 写不进去也不该影响 DSH */
   }

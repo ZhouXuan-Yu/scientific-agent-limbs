@@ -111,6 +111,10 @@ export function create(spec) {
 
   const id = newId();
   const ts = nowIso();
+  // 任务生命周期上限。到期未完成由 sweep 判为 failed，避免任务静默卡死。
+  // deadlineMinutes 传 null 表示不设限（不推荐，但允许）。
+  const minutes = spec.deadlineMinutes === null ? null : Number(spec.deadlineMinutes ?? 60);
+  const deadline = minutes === null || !Number.isFinite(minutes) ? null : new Date(Date.now() + minutes * 60000).toISOString();
   const task = {
     id,
     title: String(spec.title),
@@ -122,6 +126,9 @@ export function create(spec) {
     state: "queued",
     createdAt: ts,
     updatedAt: ts,
+    deadline,
+    lastDispatchedAt: null,
+    dispatchToken: null,
     artifacts: spec.artifacts ?? [],
     failure: null,
     notes: spec.notes ?? [],
@@ -163,6 +170,51 @@ export function setState(id, to, patch = {}) {
     detail: { from, to, hasFailure: !!patch.failure, artifacts: (patch.artifacts || []).length },
   });
   return saved;
+}
+
+/* --------------------------- 超时清扫 --------------------------- */
+
+const TERMINAL = new Set(["done", "failed", "cancelled"]);
+
+/**
+ * 扫所有非终态任务，超截止时间的分两类处理：
+ *   - dispatched / running 超时：置 failed，写清原因。任务已经发出去了，不能假装它还在跑。
+ *   - queued 超时：只报告，不改状态。还没下发不算失败，可能只是没排上队。
+ * 返回 { failed: [...], stalled: [...] }。
+ */
+export function sweep({ dryRun = false, now = new Date() } = {}) {
+  const failed = [];
+  const stalled = [];
+
+  for (const t of list()) {
+    if (TERMINAL.has(t.state)) continue;
+    if (!t.deadline) continue;
+    const due = new Date(t.deadline);
+    if (Number.isNaN(due.getTime())) continue;
+    if (due > now) continue;
+
+    if (t.state === "queued") {
+      stalled.push({ id: t.id, state: t.state, deadline: t.deadline, title: t.title });
+      continue;
+    }
+
+    if (dryRun) {
+      failed.push({ id: t.id, state: t.state, deadline: t.deadline, title: t.title, dryRun: true });
+      continue;
+    }
+    try {
+      setState(t.id, "failed", {
+        failure: `deadline exceeded: due ${t.deadline}, state was ${t.state}`,
+        note: "auto-failed by sweep",
+      });
+      failed.push({ id: t.id, state: t.state, deadline: t.deadline, title: t.title });
+    } catch (ex) {
+      stalled.push({ id: t.id, state: t.state, reason: String(ex?.message || ex) });
+    }
+  }
+
+  audit("tasks", "sweep", { ok: true, detail: { failed: failed.length, stalled: stalled.length, dryRun } });
+  return { failed, stalled };
 }
 
 /* --------------------------- 产物归档（L3.2） --------------------------- */
@@ -214,6 +266,13 @@ export function findArtifacts(keyword) {
     if (hit.length) out.push({ id: t.id, state: t.state, title: t.title, matches: hit });
   }
   return out;
+}
+
+/** 写任意字段，不做状态迁移。用于 dispatchToken / lastDispatchedAt 这类运行标记。 */
+export function patchTask(id, fields) {
+  const task = load(id);
+  Object.assign(task, fields);
+  return save(task);
 }
 
 /* --------------------------- 渲染与核对 --------------------------- */
@@ -302,11 +361,13 @@ if (invoked.endsWith("/tasks.mjs")) {
       out(verifyChecklist(load(String(process.argv[3]))));
     } else if (cmd === "sync") {
       out(syncArtifacts(String(process.argv[3])));
+    } else if (cmd === "sweep") {
+      out(sweep({ dryRun: process.argv.includes("--dry") }));
     } else if (cmd === "find") {
       const rows = findArtifacts(String(process.argv[3] || ""));
       out({ count: rows.length, rows });
     } else {
-      out({ error: "unknown command", usage: "node tasks.mjs [create|list|show|set|render|verify|sync|find]" });
+      out({ error: "unknown command", usage: "node tasks.mjs [create|list|show|set|render|verify|sync|sweep|find]" });
       process.exitCode = 2;
     }
   } catch (ex) {

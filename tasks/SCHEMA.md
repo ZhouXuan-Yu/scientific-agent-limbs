@@ -27,6 +27,9 @@ OH-WorkSpace/tasks/
 | `assignee` | string\|null | 否 | DSH 侧承接者，如 `Chief`、`写作`；本地任务为 null |
 | `sessionId` | string\|null | 否 | DSH 会话 id，下发后回填 |
 | `state` | string | 是 | 见状态机 |
+| `deadline` | string\|null | 否 | ISO 8601。到期未完成由 `sweep` 判为 failed。`create` 时用 `deadlineMinutes` 设置，默认 60 分钟，传 `null` 表示不设限 |
+| `lastDispatchedAt` | string\|null | 否 | 上次投递时间。五分钟内的重复投递会被 dispatch 拒绝（可用 `--force` 强制） |
+| `dispatchToken` | string\|null | 否 | 每次投递生成的单次标记，附在下发文本末尾，用于人工判断重复 |
 | `createdAt` | string | 是 | ISO 8601 |
 | `updatedAt` | string | 是 | ISO 8601 |
 | `artifacts` | string[] | 否 | 产物路径，相对 `OH-WorkSpace`，可多个 |
@@ -57,6 +60,7 @@ queued ──► dispatched ──► running ──► done
 - `done` 只能由大脑置位，且必须逐条核对 `acceptance`。末端自称完成不等于完成。
 - 状态只能前进，不能回退。需要重做就新建任务单，并在 `notes` 里写清与旧单的关系。
 - `cancelled` 从任何状态可达。
+- 超 `deadline` 的任务：`dispatched` / `running` 由 `sweep` 置 `failed` 并写原因；`queued` 只报告不改状态（还没下发不算失败）。
 
 ## 验收条目的写法
 

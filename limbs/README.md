@@ -14,9 +14,11 @@ Hana 是决策层，DSH 与 Zotero 是执行与记忆末端。这个目录负责
 | `health.mjs` | 两端统一自检，一条命令报 DSH 与 Zotero 状态 |
 | `tasks.mjs` | 任务单内核（L3.1），规范见 `tasks/SCHEMA.md` |
 | `inbox.mjs` | DSH 完成信号的消费端（L2.1 读侧）：增量读 turn/end |
+| `events.mjs` | 事件日志统一读取层：跨天分片合并读，兼容旧单文件 |
 | `wait-turn.mjs` | 盯住日志等某个会话的下一轮结束，作为后台任务被 wait_for_tasks 等 |
 | `dispatch.mjs` | 任务单下发闭环：渲染 → 异步投递 → 等事件 → 回写 running |
 | `test-concurrency.mjs` | L1.3 验收：三路并行下发，检查结论不串 |
+| `test-failure.mjs` | L5.2 验收：故障注入，验证出错时系统正确报错 |
 | `refs.mjs` | L4.1 四层回链：R 号 ↔ Zotero key ↔ 精读卡 ↔ 草稿段落 |
 | `audit.mjs` | L5.1 统一审计日志：记录每个动作的时间、目标、成败、耗时 |
 | `import-classics.mjs` | 把登记表已核题录的文献批量导入 Zotero，extra 写 RefsID |
@@ -80,6 +82,7 @@ node limbs/zotero-core.mjs collections   # 列顶层分类及条目数
 node limbs/zotero-core.mjs authorize     # 申请写入授权（Zotero 弹窗，选 Always Allow）
 node limbs/test-write.mjs                # L1.1 验收：创建/读回/改标签/删除 端到端
 node limbs/test-tasks.mjs                # L3.1 验收：任务单状态机自测
+node limbs/test-failure.mjs              # L5.2 验收：六类故障注入
 
 # 文献回链
 node limbs/refs.mjs link                           # 扫登记表与 Zotero，重建 refs.map.json
@@ -110,6 +113,7 @@ node limbs/tasks.mjs set T... --state running --file patch.json
 node limbs/tasks.mjs set T... --state done --file patch.json --sync   # 结单并归档产物
 node limbs/tasks.mjs verify T20261019-01-ccbc     # 打验收清单，人工逐条核对
 node limbs/tasks.mjs sync T20261019-01-ccbc       # 单独重建产物清单 manifest.json
+node limbs/tasks.mjs sweep [--dry]                # 清扫超期任务，超期的置 failed
 node limbs/tasks.mjs find concurrency             # 反查哪些任务的产物含该片段
 
 # 端口诊断
@@ -126,13 +130,13 @@ node limbs/config.mjs                             # 打印解析后的配置 + �
 大脑要判断「末端干完了没」，不能靠猜 assistant/message，也不能去轮询 DSH 内部状态。权威依据只有一个：`turn/end` 事件。
 
 `hana-bridge` 插件（装在 DSH 侧，经 junction 链到 `DSH-Desktop-Bridge/dsh-plugin/hnabridge`）在每轮结束时向
-`%APPDATA%\dsh-desktop\harness\logs\hana-bridge-events.jsonl` 追加一行：
+`%APPDATA%\dsh-desktop\harness\logs\hana-bridge-events-YYYYMMDD.jsonl` 追加一行（按天分片，避免单文件无限增长）：
 
 ```json
 {"kind":"turn/end","at":"...","sessionId":"session-...","turn":1,"reasonKind":null,"textChars":2,"text":"ok"}
 ```
 
-`inbox.mjs` 按行号偏移增量消费，不重读、不漏读；日志被清空或轮转时偏移自动回退到 0。
+`inbox.mjs` 按事件时间戳增量消费（不是行号，行号在分片下没意义），不重读、不漏读；偏移记录在 `<stateDir>/inbox-offset.json`。切换前的旧单文件仍会读，但不再增长。
 
 **怎么做到「自动唤醒」（2026-10-19 实测）**：`loop_control` 这条路走不通，调用时提示「当前会话没有活跃循环」。改用阻塞命令：`wait-turn.mjs` 盯住日志等某个会话的下一轮结束，它作为后台任务跑，`wait_for_tasks` 在它退出时唤醒大脑。实测 8056 毫秒内捕获到 turn/end，大脑被叫醒并继续处理。
 
@@ -207,6 +211,7 @@ node limbs/config.mjs                             # 打印解析后的配置 + �
 | L3.2 | 产物目录规范 | 按任务号归档可反查 | 部分（目录与产物指针已定义，归档规则待实践检验） |
 | L4.1 | 四层回链 | 条目↔精读卡↔草稿可双向追溯 | 部分：四层工具链已跑通，绑定从 21 提至 27；审计发现正文引用标注局部化（12 处无标记）；六张精读卡待建 |
 | L5.1 | 日志与审计 | 每个动作留痕，失败可定位 | 通过（覆盖拉起、写库、任务单、下发、消费、建映射；只读操作不记） |
+| L5.2 | 故障注入 | 出错时系统正确报错 | 通过（13 项：版本冲突 412、非法迁移、幂等拒绝、日志缺失超时、不存在任务单） |
 
 ## 回滚
 

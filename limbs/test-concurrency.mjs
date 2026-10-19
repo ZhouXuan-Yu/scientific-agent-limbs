@@ -15,9 +15,9 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { send } from "../DSH-Desktop-Bridge/bin/dsh-core.mjs";
 import { config } from "./config.mjs";
+import { turnEnds as turnEndEvents } from "./events.mjs";
 
 const C = config();
-const LOG = process.env.HANA_BRIDGE_LOG || C.dsh.bridgeLogPath;
 
 function arg(name, dflt) {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,30 +49,14 @@ const CASES = [
 
 const CODES = CASES.map((c) => c.code);
 
-function logLineCount() {
-  try {
-    return readFileSync(LOG, "utf8").split("\n").filter((l) => l.trim()).length;
-  } catch {
-    return 0;
-  }
+/** 用当前最新事件的时间戳做基线，跨分片也成立。 */
+function nowMark() {
+  const all = turnEndEvents();
+  return all.reduce((m, e) => (e.at && e.at > m ? e.at : m), "");
 }
 
-function turnEndsSince(baseline) {
-  try {
-    const lines = readFileSync(LOG, "utf8").split("\n").filter((l) => l.trim());
-    const out = [];
-    for (const l of lines.slice(baseline)) {
-      try {
-        const o = JSON.parse(l);
-        if (o.kind === "turn/end") out.push(o);
-      } catch {
-        /* ignore */
-      }
-    }
-    return out;
-  } catch {
-    return [];
-  }
+function turnEndsSince(mark) {
+  return turnEndEvents().filter((e) => !mark || (e.at && e.at > mark));
 }
 
 let failed = 0;
@@ -86,7 +70,7 @@ function check(step, ok, detail = "") {
 
 /* ---------------- 并行下发 ---------------- */
 
-const baseline = logLineCount();
+const baseline = nowMark();
 const t0 = Date.now();
 
 const settled = await Promise.all(

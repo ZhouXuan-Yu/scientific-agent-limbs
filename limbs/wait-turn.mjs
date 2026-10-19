@@ -17,10 +17,7 @@
  * 输出一行 JSON，便于调用方直接解析。
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { config } from "./config.mjs";
-
-const LOG = process.env.HANA_BRIDGE_LOG || config().dsh.bridgeLogPath;
+import { turnEnds } from "./events.mjs";
 
 function arg(name, dflt) {
   for (const flag of [`--${name}`, `-${name}`]) {
@@ -63,23 +60,13 @@ const pollMs = Number(arg("interval", 2000));
 const deadline = Date.now() + timeoutSec * 1000;
 const t0 = Date.now();
 
-/** 扫一遍日志，按会话归集 turn/end。 */
+/** 按会话归集 turn/end（跨分片读，由 events.mjs 统一处理）。 */
 function scan() {
   const map = new Map();
-  if (!existsSync(LOG)) return map;
-  for (const line of readFileSync(LOG, "utf8").split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const o = JSON.parse(t);
-      if (o.kind !== "turn/end" || !o.sessionId) continue;
-      if (!unique.includes(o.sessionId)) continue;
-      const arr = map.get(o.sessionId) || [];
-      arr.push(o);
-      map.set(o.sessionId, arr);
-    } catch {
-      /* 跳过坏行 */
-    }
+  for (const e of turnEnds({ sessions: unique })) {
+    const arr = map.get(e.sessionId) || [];
+    arr.push(e);
+    map.set(e.sessionId, arr);
   }
   return map;
 }

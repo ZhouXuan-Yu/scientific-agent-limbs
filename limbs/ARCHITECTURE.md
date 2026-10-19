@@ -59,7 +59,8 @@
 | `dsh-core.mjs` | DSH 凭证链与 RPC（在 `DSH-Desktop-Bridge/bin/`） | config.json（同步读） | 被其他模块 import |
 | `health.mjs` | 两端统一自检 | zotero-core / dsh-core | `node health.mjs` |
 | `tasks.mjs` | 任务单状态机与产物目录 | config / audit | `node tasks.mjs list` |
-| `inbox.mjs` | 增量消费 DSH 完成事件 | config / audit | `node inbox.mjs` |
+| `inbox.mjs` | 增量消费 DSH 完成事件 | config / audit / events | `node inbox.mjs` |
+| `events.mjs` | 事件日志统一读取层，跨分片合并 | config | `node events.mjs files` |
 | `wait-turn.mjs` | 阻塞等某会话的下一轮结束 | config | `node wait-turn.mjs --session X` |
 | `dispatch.mjs` | 任务单下发闭环 | tasks / dsh-core / audit | `node dispatch.mjs --task T...` |
 | `refs.mjs` | 文献四层回链 | zotero-core / config / audit | `node refs.mjs status` |
@@ -67,6 +68,7 @@
 | `fetch-arxiv.mjs` | 从 arXiv API 取元数据 | 网络 | `node fetch-arxiv.mjs 1512.03385` |
 | `probe.mjs` / `diag-dsh.mjs` | 端口与判定逻辑诊断 | 无 | 排查用 |
 | `test-*.mjs` | 各层验收脚本，自带清理 | 对应模块 | 见 README |
+| `test-failure.mjs` | 故障注入，验出错时正确报错 | 全部 | `node test-failure.mjs` |
 
 ## 四、外部依赖
 
@@ -168,6 +170,9 @@ node limbs/refs.mjs status   # 文献回链
 | 一个 `wait-turn` 只盯一个会话 | 三任务并行要挂三个等待任务 | 接受，够用但笨 |
 | 「自动唤醒」靠后台任务 + `wait_for_tasks`，不是平台级执行注入 | 宿主要支持后台命令与任务等待 | `loop_control` 那条路走不通（无活跃循环） |
 | Zotero 写授权只能人工点 | 全新环境第一次必须有人在 | 选 Always Allow 后 key 长期有效 |
+| 事件日志无轮转 | 已解决：按天分片 + 统一读取层，旧单文件兼容 | 2026-10-19 改 |
+| 任务会否静默卡死 | 已解决：deadline + sweep，超期自动置 failed | 2026-10-19 改 |
+| 重复投递 | 已解决：五分钟门禁 + dispatchToken | 2026-10-19 改 |
 | 文献匹配靠标题字面 | 中文简称、作者+年份式提及会漏 | `refs.mjs mention` 只作线索，结论靠人 |
 | 精读卡没有自动生成 | 只能手写，无法批量补 | 结构已定，内容属研究工作 |
 | 单实例应用被外部重启会中断任务 | DSH 被 spawn 时正在跑的任务会断 | 用进程守卫避免误拉 |
@@ -189,6 +194,7 @@ node limbs/refs.mjs status   # 文献回链
 | L3.1 任务单规范 | 状态机自测 18 项全过 | `test-tasks.mjs` |
 | L4.1 四层回链 | 绑定 27/37，审计出 12 处无标记 | `research/60-writing/ref-audit-20261019.md` |
 | L5.1 审计 | 六个动作已接入 | `audit.mjs stats` |
+| L5.2 故障注入 | 13 项全过，含版本冲突 412 与对照组 | `test-failure.mjs` |
 
 ## 十一、这份体系里没有的东西
 

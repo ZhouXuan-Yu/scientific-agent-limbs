@@ -23,11 +23,11 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_MODEL,
 } from "../DSH-Desktop-Bridge/bin/dsh-core.mjs";
-import { load, setState, render } from "./tasks.mjs";
+import { load, setState, render, patchTask } from "./tasks.mjs";
 import { audit } from "./audit.mjs";
+import { randomBytes } from "node:crypto";
 import { config } from "./config.mjs";
-
-const LOG = process.env.HANA_BRIDGE_LOG || config().dsh.bridgeLogPath;
+import { turnEnds } from "./events.mjs";
 
 function arg(name, dflt) {
   for (const flag of [`--${name}`, `-${name}`]) {
@@ -44,18 +44,8 @@ function out(o) {
 
 /** 该会话当前最大 turn 号。turn 号单调递增，用它做基线比时间戳可靠。 */
 function maxTurn(sid) {
-  if (!existsSync(LOG)) return 0;
   let m = 0;
-  for (const line of readFileSync(LOG, "utf8").split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const o = JSON.parse(t);
-      if (o.kind === "turn/end" && o.sessionId === sid) m = Math.max(m, Number(o.turn) || 0);
-    } catch {
-      /* 跳过坏行 */
-    }
-  }
+  for (const e of turnEnds({ sessions: [sid] })) m = Math.max(m, Number(e.turn) || 0);
   return m;
 }
 
@@ -79,6 +69,29 @@ if (task.state !== "queued" && task.state !== "dispatched") {
   process.exit(2);
 }
 
+/* 幂等门禁：五分钟内重复投递直接拒绝。
+ * 理由：dispatch 中途挂掉后重跑会再发一遍，DSH 会收到重复任务。
+ * 要真的重发就显式 --force。 */
+const GUARD_MS = 5 * 60 * 1000;
+const force = process.argv.includes("--force");
+if (!force && task.lastDispatchedAt) {
+  const since = Date.now() - new Date(task.lastDispatchedAt).getTime();
+  if (since >= 0 && since < GUARD_MS) {
+    audit("dispatch", "refused-duplicate", { target: taskId, ok: false, error: "duplicate within guard window" });
+    out({
+      error: "duplicate dispatch refused",
+      taskId,
+      lastDispatchedAt: task.lastDispatchedAt,
+      sinceMs: since,
+      guardMs: GUARD_MS,
+      hint: "use --force to override",
+    });
+    process.exit(2);
+  }
+}
+
+const dispatchToken = randomBytes(8).toString("hex");
+
 const t0 = Date.now();
 
 /* 1. 会话 */
@@ -96,12 +109,13 @@ sid = String(sid);
 const baseline = maxTurn(sid);
 
 /* 2. 投递 */
-const prompt = render(task);
+const prompt = render(task) + `\n\n[dispatch-token: ${dispatchToken}]`;
 await submit(sid, prompt);
+patchTask(taskId, { lastDispatchedAt: new Date().toISOString(), dispatchToken });
 audit("dispatch", "submit", {
   target: taskId,
   ok: true,
-  detail: { sessionId: sid, reusedSession: reused, promptChars: prompt.length },
+  detail: { sessionId: sid, reusedSession: reused, promptChars: prompt.length, token: dispatchToken },
 });
 
 if (task.state === "queued") {
@@ -113,18 +127,10 @@ const deadline = Date.now() + timeoutSec * 1000;
 let hit = null;
 while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, pollMs));
-  if (!existsSync(LOG)) continue;
-  for (const line of readFileSync(LOG, "utf8").split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const o = JSON.parse(t);
-      if (o.kind === "turn/end" && o.sessionId === sid && (Number(o.turn) || 0) > baseline) {
-        hit = o;
-        break;
-      }
-    } catch {
-      /* 跳过坏行 */
+  for (const e of turnEnds({ sessions: [sid] })) {
+    if ((Number(e.turn) || 0) > baseline) {
+      hit = e;
+      break;
     }
   }
   if (hit) break;
@@ -140,7 +146,26 @@ if (!hit) {
     detail: { sessionId: sid, timeoutSec },
     error: "no turn/end within timeout",
   });
-  out({ taskId, sessionId: sid, phase: "timeout", timeoutSec, elapsedMs: elapsed, baselineTurn: baseline });
+  // 超时不再是「只报错」：任务已经发出去了，不能让它提在 dispatched 不动。
+  let stateAfter = null;
+  try {
+    setState(taskId, "failed", {
+      failure: `no turn/end within ${timeoutSec}s (session ${sid})`,
+      note: "auto-failed by dispatch timeout",
+    });
+    stateAfter = "failed";
+  } catch (ex) {
+    stateAfter = `unchanged: ${String(ex?.message || ex)}`;
+  }
+  out({
+    taskId,
+    sessionId: sid,
+    phase: "timeout",
+    state: stateAfter,
+    timeoutSec,
+    elapsedMs: elapsed,
+    baselineTurn: baseline,
+  });
   process.exit(1);
 }
 
