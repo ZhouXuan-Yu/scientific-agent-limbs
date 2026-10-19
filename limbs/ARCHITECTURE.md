@@ -63,6 +63,7 @@
 | `events.mjs` | 事件日志统一读取层，跨分片合并 | config | `node events.mjs files` |
 | `wait-turn.mjs` | 阻塞等某会话的下一轮结束 | config | `node wait-turn.mjs --session X` |
 | `dispatch.mjs` | 任务单下发闭环 | tasks / dsh-core / audit | `node dispatch.mjs --task T...` |
+| `daemon.mjs` | 状态守护：清扫、推进、留摘要 | tasks / events / audit | `node daemon.mjs --once` |
 | `refs.mjs` | 文献四层回链 | zotero-core / config / audit | `node refs.mjs status` |
 | `import-classics.mjs` | 批量导入文献到 Zotero | zotero-core | `node import-classics.mjs --dry` |
 | `fetch-arxiv.mjs` | 从 arXiv API 取元数据 | 网络 | `node fetch-arxiv.mjs 1512.03385` |
@@ -175,6 +176,7 @@ node limbs/refs.mjs status   # 文献回链
 | 重复投递 | 已解决：五分钟门禁 + dispatchToken | 2026-10-19 改 |
 | 文献匹配靠标题字面 | 中文简称、作者+年份式提及会漏 | `refs.mjs mention` 只作线索，结论靠人 |
 | 精读卡没有自动生成 | 只能手写，无法批量补 | 结构已定，内容属研究工作 |
+| daemon 不会叫醒人 | 它只能留摘要，不能主动发起新回合 | 宿主无执行注入能力；进场先跑 `--report` |
 | 单实例应用被外部重启会中断任务 | DSH 被 spawn 时正在跑的任务会断 | 用进程守卫避免误拉 |
 | 全部命令依赖桌面会话 | 无人值守场景不成立 | 明确写死，不假装支持 |
 
@@ -191,6 +193,7 @@ node limbs/refs.mjs status   # 文献回链
 | L1.2 下发与回收 | dispatch 端到端 90.9 秒 | `tasks/T20261019-02-1b25.json` |
 | L1.3 并发不串 | 两轮 12 项判据全过 | `tasks/T20261019-01-ccbc/concurrency.md` |
 | L2.1 回传主动性 | wait-turn 8.06 秒唤醒 | README 完成信号一节 |
+| L2.2 状态守护 | 11 项全过，含幂等与摘要 | `test-daemon.mjs` |
 | L3.1 任务单规范 | 状态机自测 18 项全过 | `test-tasks.mjs` |
 | L4.1 四层回链 | 绑定 27/37，审计出 12 处无标记 | `research/60-writing/ref-audit-20261019.md` |
 | L5.1 审计 | 六个动作已接入 | `audit.mjs stats` |

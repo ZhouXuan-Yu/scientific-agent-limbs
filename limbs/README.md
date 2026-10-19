@@ -17,8 +17,10 @@ Hana 是决策层，DSH 与 Zotero 是执行与记忆末端。这个目录负责
 | `events.mjs` | 事件日志统一读取层：跨天分片合并读，兼容旧单文件 |
 | `wait-turn.mjs` | 盯住日志等某个会话的下一轮结束，作为后台任务被 wait_for_tasks 等 |
 | `dispatch.mjs` | 任务单下发闭环：渲染 → 异步投递 → 等事件 → 回写 running |
+| `daemon.mjs` | 状态守护：清扫超期、推进卡住的任务、留摘要（不置 done） |
 | `test-concurrency.mjs` | L1.3 验收：三路并行下发，检查结论不串 |
 | `test-failure.mjs` | L5.2 验收：故障注入，验证出错时系统正确报错 |
+| `test-daemon.mjs` | L2.2 验收：守护推进与幂等 |
 | `refs.mjs` | L4.1 四层回链：R 号 ↔ Zotero key ↔ 精读卡 ↔ 草稿段落 |
 | `audit.mjs` | L5.1 统一审计日志：记录每个动作的时间、目标、成败、耗时 |
 | `import-classics.mjs` | 把登记表已核题录的文献批量导入 Zotero，extra 写 RefsID |
@@ -83,6 +85,7 @@ node limbs/zotero-core.mjs authorize     # 申请写入授权（Zotero 弹窗，
 node limbs/test-write.mjs                # L1.1 验收：创建/读回/改标签/删除 端到端
 node limbs/test-tasks.mjs                # L3.1 验收：任务单状态机自测
 node limbs/test-failure.mjs              # L5.2 验收：六类故障注入
+node limbs/test-daemon.mjs               # L2.2 验收：守护推进与幂等
 
 # 文献回链
 node limbs/refs.mjs link                           # 扫登记表与 Zotero，重建 refs.map.json
@@ -104,6 +107,9 @@ node limbs/inbox.mjs --all --json                 # 全部历史，机器可读
 node limbs/inbox.mjs --reset                      # 丢弃积压，偏移归零到末尾
 node limbs/wait-turn.mjs --session session-xxx --timeout 600   # 阻塞等下一轮结束
 node limbs/dispatch.mjs --task T... --timeout 600  # 任务单一条命令下发并等回报
+node limbs/daemon.mjs --once                      # 跑一轮状态守护
+node limbs/daemon.mjs --report                    # 只看摘要（进场先看这个）
+node limbs/daemon.mjs --interval 60               # 常驻（Ctrl-C 退）
 node limbs/tasks.mjs list                         # 全部任务
 node limbs/tasks.mjs list --state running         # 按状态过滤
 node limbs/tasks.mjs create --file spec.json      # 新建（中文内容一律走文件）
@@ -207,6 +213,7 @@ node limbs/config.mjs                             # 打印解析后的配置 + �
 | L1.2 | DSH 下发与回收 | 端到端一次成功 | 通 |
 | L1.3 | 并发稳定性 | 3 任务并行不串 | 通过（两轮实测，12 项判据全过；单飞修复后 6124 毫秒） |
 | L2.1 | 回传主动性 | DSH 结束能主动唤醒大脑 | 通过（wait-turn + wait_for_tasks 实测 8 秒唤醒；dispatch 端到端 90.9 秒收到回报） |
+| L2.2 | 状态守护 | 无人看管时状态不说谎 | 通过（11 项：卡住任务自动推进、幂等、摘要可读） |
 | L3.1 | 任务单规范 | JSON 含任务号/目标/验收/产物/状态 | 通过（规范 + 内核 + 自测 18 项全过） |
 | L3.2 | 产物目录规范 | 按任务号归档可反查 | 部分（目录与产物指针已定义，归档规则待实践检验） |
 | L4.1 | 四层回链 | 条目↔精读卡↔草稿可双向追溯 | 部分：四层工具链已跑通，绑定从 21 提至 27；审计发现正文引用标注局部化（12 处无标记）；六张精读卡待建 |
