@@ -107,7 +107,10 @@ node limbs/tasks.mjs create --file spec.json      # 新建（中文内容一律�
 node limbs/tasks.mjs show T20261019-01-ccbc       # 看详情
 node limbs/tasks.mjs render T20261019-01-ccbc     # 渲染成下发文本
 node limbs/tasks.mjs set T... --state running --file patch.json
+node limbs/tasks.mjs set T... --state done --file patch.json --sync   # 结单并归档产物
 node limbs/tasks.mjs verify T20261019-01-ccbc     # 打验收清单，人工逐条核对
+node limbs/tasks.mjs sync T20261019-01-ccbc       # 单独重建产物清单 manifest.json
+node limbs/tasks.mjs find concurrency             # 反查哪些任务的产物含该片段
 
 # 端口诊断
 node limbs/probe.mjs 23119 3

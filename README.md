@@ -78,7 +78,7 @@ dsh-plugin/hnabridge  →  %APPDATA%\dsh-desktop\harness\profiles\web\node_modul
   hana-bridge 插件 ──► 事件日志 ──► wait-turn ──► 唤醒大脑
 ```
 
-详细设计、依赖版本、重建步骤见 [limbs/ARCHITECTURE.md](limbs/ARCHITECTURE.md)。
+详细设计、依赖版本、重建步骤见 [limbs/ARCHITECTURE.md](limbs/ARCHITECTURE.md)。八条约束背后的事故与取舍见 [docs/adr.md](docs/adr.md)。
 
 ## 几条不肯让步的原则
 

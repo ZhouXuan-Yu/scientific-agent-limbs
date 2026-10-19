@@ -287,7 +287,15 @@ if (invoked.endsWith("/tasks.mjs")) {
       const id = String(process.argv[3]);
       const to = arg("state");
       if (!to || to === true) throw new Error("set requires --state <state>");
-      out(setState(id, String(to), readJsonArg("file") || {}));
+      const saved = setState(id, String(to), readJsonArg("file") || {});
+      // --sync 显式触发：扫任务目录，生成 manifest，把产物路径回写 artifacts。
+      // 不默认做，因为可能在用户没预期的时候改动任务单内容。
+      if (process.argv.includes("--sync")) {
+        const m = syncArtifacts(id);
+        out({ ...load(id), _sync: { files: m.fileCount, manifest: `tasks/${id}/manifest.json` } });
+      } else {
+        out(saved);
+      }
     } else if (cmd === "render") {
       process.stdout.write(render(load(String(process.argv[3]))) + "\n");
     } else if (cmd === "verify") {
