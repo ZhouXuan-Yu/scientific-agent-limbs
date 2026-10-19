@@ -26,6 +26,8 @@ import {
 import { load, setState, render, patchTask } from "./tasks.mjs";
 import { audit } from "./audit.mjs";
 import { randomBytes } from "node:crypto";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { config } from "./config.mjs";
 import { turnEnds } from "./events.mjs";
 
@@ -98,7 +100,9 @@ const t0 = Date.now();
 let sid = arg("session");
 const reused = !!(sid && sid !== true);
 if (!reused) {
-  const created = await rpc("session/create", { request: {} });
+  // 必须传 cwd：不传的话 DSH 会用它的 launch-root 作为工作目录，
+  // 任务单里的相对路径就会落到那边去（2026-10-19 真实发生过）。
+  const created = await rpc("session/create", { request: { cwd: config().workspace } });
   sid = created.sessionId;
   await rpc("session/selectModel", {
     request: { sessionId: sid, provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL },
@@ -171,11 +175,31 @@ if (!hit) {
 
 /* 4. 回写 */
 setState(taskId, "running", { sessionId: sid, note: `turn ${hit.turn} completed in ${elapsed}ms` });
+
+// 产物落点检查：只说完成了不算，得看见文件。
+// 缺目录不判失败（任务可能本来就不产出文件），但必须报出来，不能默认成功。
+const artifactDir = join(config().paths.tasks, taskId);
+let artifactFiles = 0;
+let artifactWarning = null;
+if (!existsSync(artifactDir)) {
+  artifactWarning = `artifact dir missing: ${artifactDir}`;
+} else {
+  try {
+    artifactFiles = readdirSync(artifactDir, { withFileTypes: true }).filter((d) => d.isFile()).length;
+    if (artifactFiles === 0) artifactWarning = "artifact dir exists but contains no files at top level";
+  } catch (ex) {
+    artifactWarning = `cannot read artifact dir: ${String(ex?.message || ex)}`;
+  }
+}
+if (artifactWarning) {
+  audit("dispatch", "artifact-missing", { target: taskId, ok: false, error: artifactWarning });
+}
+
 audit("dispatch", "complete", {
   target: taskId,
   ok: true,
   ms: elapsed,
-  detail: { sessionId: sid, turn: hit.turn, textChars: hit.textChars },
+  detail: { sessionId: sid, turn: hit.turn, textChars: hit.textChars, artifactFiles },
 });
 
 out({
@@ -185,5 +209,8 @@ out({
   turn: hit.turn,
   elapsedMs: elapsed,
   text: hit.text,
-  next: "逐条核对验收标准后，用 tasks.mjs set --state done 结单",
+  artifactDir,
+  artifactFiles,
+  ...(artifactWarning ? { artifactWarning } : {}),
+  next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",
 });

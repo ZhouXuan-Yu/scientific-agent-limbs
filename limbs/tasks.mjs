@@ -284,7 +284,8 @@ export function render(task) {
   lines.push(`目标：${task.goal}`);
   lines.push(`验收标准：`);
   task.acceptance.forEach((a, i) => lines.push(`${i + 1}. ${a}`));
-  lines.push(`产物目录：tasks/${task.id}/`);
+  // 绝对路径：端的工作目录不一定是 workspace，相对路径会落错地方（2026-10-19 真实发生过）。
+  lines.push(`产物目录（绝对路径）：${join(WORKSPACE, "tasks", task.id)}`);
   lines.push(`回报要求：完成后回复做了什么、产物路径、哪条验收标准存疑。`);
   return lines.join("\n");
 }
