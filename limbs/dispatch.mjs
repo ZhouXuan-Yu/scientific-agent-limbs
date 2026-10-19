@@ -107,6 +107,15 @@ if (!reused) {
   await rpc("session/selectModel", {
     request: { sessionId: sid, provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL },
   });
+  // 标题加任务号前缀：会话列表里有几十个，不标就分不清哪个是下发任务。
+  // 标题是给人看的溯源入口，比日志和 JSON 更直接。
+  try {
+    await rpc("session/rename", {
+      request: { sessionId: sid, title: `[任务] ${taskId} ${task.title}` },
+    });
+  } catch (ex) {
+    audit("dispatch", "rename-failed", { target: taskId, ok: false, error: String(ex?.message || ex) });
+  }
 }
 sid = String(sid);
 
