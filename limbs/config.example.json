@@ -1,0 +1,28 @@
+{
+  "_comment": "复制为 config.json 后修改。相对路径相对 workspace 解析；所有项都可被环境变量覆盖，见 ARCHITECTURE.md 第七节。",
+  "workspace": "C:/path/to/your/workspace",
+  "stateDir": "C:/Users/YOU/.local/state/limbs",
+
+  "zotero": {
+    "exe": "C:/Program Files/Zotero/zotero.exe",
+    "port": 23119,
+    "startTimeoutMs": 90000
+  },
+
+  "dsh": {
+    "exe": "C:/path/to/DSH Desktop/DSH Desktop.exe",
+    "logPath": "C:/Users/YOU/AppData/Roaming/dsh-desktop/logs/harness.log",
+    "bridgeLogPath": "C:/Users/YOU/AppData/Roaming/dsh-desktop/harness/logs/hana-bridge-events.jsonl",
+    "provider": "deepseek-official",
+    "model": "deepseek-flash"
+  },
+
+  "paths": {
+    "tasks": "tasks",
+    "audit": "limbs/_audit",
+    "cards": "research/40-knowledge/cards",
+    "references": "research/60-writing/references.md",
+    "refsMap": "research/60-writing/refs.map.json",
+    "draft": "research/qinjian-report/draft.md"
+  }
+}

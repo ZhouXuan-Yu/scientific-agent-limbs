@@ -1,0 +1,5 @@
+# hana-bridge：装进 DSH 的 host 插件（只读通知版）
+# 只订阅事件并往外写文件，不拦截任何决策。
+- insert:
+    - id: hana-bridge
+      name: hana-bridge

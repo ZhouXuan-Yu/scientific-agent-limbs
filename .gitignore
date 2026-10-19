@@ -1,0 +1,22 @@
+# 真实配置，含本机绝对路径，不入库
+limbs/config.json
+
+# 审计日志
+limbs/_audit/
+*.jsonl
+
+# 任务单数据（规范 SCHEMA.md 入库，数据不入库）
+tasks/T*/
+tasks/T*.json
+
+# 运行时状态（cookie、写授权 key、偏移量）
+*.cookie.json
+*local-key.json
+*cli-cookie.json
+inbox-offset.json
+
+# 依赖与日志
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
