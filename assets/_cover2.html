@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1080px;height:1440px;background:#f4f2ed;font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#221f1a;display:flex;flex-direction:column;overflow:hidden}
+.top{padding:68px 76px 0;flex:0 0 auto}
+.kicker{font-size:16px;letter-spacing:.26em;color:#9a948a;margin-bottom:26px}
+h1{font-size:76px;line-height:1.09;font-weight:800;letter-spacing:-.03em}
+h1 em{font-style:normal;color:#2f8f5b}
+.sub{font-size:28px;line-height:1.55;color:#5f5a51;margin-top:22px;font-weight:500}
+.sub b{color:#221f1a;font-weight:700}
+.art{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:10px 56px}
+.art svg{width:100%;height:100%;display:block}
+.foot{padding:0 76px 54px;flex:0 0 auto}
+.repo{border-top:1px solid #d9d4c9;padding-top:22px;display:flex;justify-content:space-between;align-items:flex-end;gap:20px}
+.repo .v{font-family:ui-monospace,Consolas,monospace;font-size:24px;color:#2f8f5b;letter-spacing:-.01em}
+.repo .v span{color:#a8a29a}
+.repo .m{font-size:17px;color:#9a948a;letter-spacing:.1em;white-space:nowrap}
+</style></head><body>
+<div class="top">
+  <div class="kicker">AI · 科研 · 自动化</div>
+  <h1><em>8</em> 个 AI<br>组成一支<br>科研团队</h1>
+  <div class="sub">一个总管派活，七个各管一摊<br>接的是<b>你自己的 Zotero</b></div>
+</div>
+
+<div class="art">
+<svg id="s" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f2ed"/><stop offset="1" stop-color="#eae7e0"/>
+    </linearGradient>
+  </defs>
+  <g id="scene"></g>
+</svg>
+</div>
+
+<div class="foot">
+  <div class="repo">
+    <div class="v">github.com<span>/</span>ZhouXuan-Yu<span>/</span>scientific-agent-limbs</div>
+    <div class="m">MIT</div>
+  </div>
+</div>
+
+<script>
+const g = document.getElementById("scene");
+const A = Math.PI/6, COS = Math.cos(A), SIN = Math.sin(A);
+const P = (x,y,z) => [(x-y)*COS, (x+y)*SIN - z];
+
+const T = {
+  lo:   {t:"#eae7e0", l:"#dcd8cf", r:"#cecabf"},
+  mid:  {t:"#dcd8cf", l:"#cbc6ba", r:"#bbb6a8"},
+  hi:   {t:"#cec9bc", l:"#bab4a5", r:"#a8a293"},
+  dark: {t:"#8d8779", l:"#7a7466", r:"#686254"},
+  lit:  {t:"#3f9b6b", l:"#317f58", r:"#276848"},
+  paper:{t:"#f4f1e9", l:"#e9e5db", r:"#ded9cc"}
+};
+
+function poly(pts, fill, stroke, sw){
+  const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  p.setAttribute("points", pts.map(q=>q[0].toFixed(2)+","+q[1].toFixed(2)).join(" "));
+  p.setAttribute("fill", fill);
+  p.setAttribute("stroke", stroke || "rgba(90,84,70,.32)");
+  p.setAttribute("stroke-width", sw || 1);
+  p.setAttribute("stroke-linejoin","round");
+  g.appendChild(p);
+}
+function box(x,y,z,w,d,h,tone,sw){
+  const c = T[tone];
+  const p = (a,b,e)=>P(x+a, y+b, z+e);
+  poly([p(0,0,h), p(w,0,h), p(w,d,h), p(0,d,h)], c.t, null, sw);
+  poly([p(0,d,h), p(w,d,h), p(w,d,0), p(0,d,0)], c.l, null, sw);
+  poly([p(w,0,h), p(w,d,h), p(w,d,0), p(w,0,0)], c.r, null, sw);
+}
+function line3(x0,y0,z0,x1,y1,z1,color,sw){
+  const a=P(x0,y0,z0), b=P(x1,y1,z1);
+  const l=document.createElementNS("http://www.w3.org/2000/svg","line");
+  l.setAttribute("x1",a[0].toFixed(2)); l.setAttribute("y1",a[1].toFixed(2));
+  l.setAttribute("x2",b[0].toFixed(2)); l.setAttribute("y2",b[1].toFixed(2));
+  l.setAttribute("stroke",color); l.setAttribute("stroke-width",sw||1);
+  l.setAttribute("stroke-linecap","round");
+  g.appendChild(l);
+}
+
+/* ===== 世界坐标 ===== */
+
+// 文献柜（Zotero）：坐在台面后半部的矮柜，带底座
+box(30, 4, 16, 146, 44, 5, "mid");
+box(24, 4, 16, 146, 42, 71, "lo");
+for (let i=0;i<3;i++){
+  box(32, 6, 31+i*18, 130, 2, 11, "paper");
+  line3(32, 8, 29+i*18, 162, 8, 29+i*18, "rgba(90,84,70,.22)", 1);
+}
+box(24, 4, 87, 146, 42, 8, "mid");
+
+// 台面（宽度要覆盖最后一个工位）
+box(0, 0, 0, 402, 174, 16, "mid");
+// 台面前沿凹槽
+box(8, 168, 4, 386, 3, 7, "dark");
+
+// 八个 Bot 沿 x 排成一行
+const N = 8;
+const step = 47, startX = 22, colW = 34;
+for (let i=0;i<N;i++){
+  const x = startX + i*step;
+  const chief = (i===0);
+  const h = chief ? 80 : 58;
+  const tone = chief ? "hi" : "mid";
+  box(x, 92, 16, colW, colW, h, tone);
+  // 柜顶一条细边（不另起一块盖）
+  line3(x, 92, 16+h, x+colW, 92, 16+h, "rgba(90,84,70,.28)", 1);
+  // 正面嵌板（深色屏幕）
+  box(x+8, 125, 34, colW-16, 2, h-30, "dark", 0.8);
+  // 嵌板内一道亮线，表示在跑
+  line3(x+10, 127.5, 34+(h-30)*0.6, x+colW-10, 127.5, 34+(h-30)*0.6, chief ? "#eaf4ee" : "#b7b1a4", 1.6);
+  if (chief){
+    box(x+2, 94, 16+h, colW-4, colW-4, 7, "lit");
+  }
+}
+
+// 台面前沿正中一块立着的小铭牌
+box(146, 167, 16, 44, 4, 18, "lit");
+box(144, 166, 34, 48, 6, 3, "hi");
+
+/* ===== 让 SVG 随内容收缩 ===== */
+const bb = g.getBBox();
+const pad = 28;
+const s = document.getElementById("s");
+s.setAttribute("viewBox", (bb.x-pad).toFixed(1)+" "+(bb.y-pad).toFixed(1)+" "+(bb.width+pad*2).toFixed(1)+" "+(bb.height+pad*2).toFixed(1));
+s.setAttribute("preserveAspectRatio","xMidYMid meet");
+// 背景铺满 viewBox
+const bg = document.createElementNS("http://www.w3.org/2000/svg","rect");
+bg.setAttribute("x", bb.x-pad); bg.setAttribute("y", bb.y-pad);
+bg.setAttribute("width", bb.width+pad*2); bg.setAttribute("height", bb.height+pad*2);
+bg.setAttribute("fill","url(#bgf)");
+s.insertBefore(bg, s.firstChild);
+</script>
+</body></html>
