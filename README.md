@@ -68,6 +68,65 @@
 
 > 小研：存疑项：小智的 role 未在 list_bots 中返回，不能猜测或擅自填为「日常助理」。请确认是否允许写为 null？
 
+## 信息回流：怎么知道对面真的做完了
+
+这是整套东西里设计得最细的一块。
+
+![三层信号](assets/data-flow.png)
+
+问题在于：团队干活的地方你看不见。群聊里只记录公开发言，Bot 之间的协作发生在各自的 session 里，产物在另一个目录里。只看其中一个，都会误判。
+
+三次判断失败的教训：
+
+1. 等第一个 `turn/end` —— 只捕到「接单」那一步
+2. 等群聊安静 90 秒 —— 返回了，但负责人两分钟后才改完文件
+3. 读群聊 log 收集发言 —— 审稿完成了 16 步抽查，报告写在自己 session 里，从未进群
+
+这件事有学名：**分布式终止检测**（Dijkstra & Scholten, 1980）。终止条件是两项合取——**所有进程 passive，且所有通道为空**。只看通道（群聊）或只看进程（session）都会错。
+
+所以判据是三条信号同时静止：
+
+| 信号 | 读什么 | 覆盖什么 |
+|---|---|---|
+| A 公开 | `state.json` 的 `rooms[].log` 的 seq | 团队在群里说的话 |
+| B 私下 | 成员 session 的 turns 总和 | Bot 之间的工作 |
+| C 落盘 | 产物目录的 mtime + size 摘要 | 结果是否已写到磁盘 |
+
+任一变化重置计时；三条全静止且无 session 在跑，持续 90 秒才算完。
+
+完成之后还要做一件事：`memberReplies()` 拉回每个成员 session 的最后一条回复。否则你只知道「做完了」，不知道「它们说了什么」——审稿那份四条 MAJOR 的意见就是这样丢过一次。
+
+具体的接口与实现：
+
+```
+POST /api/session/prompt    投递任务，body 里 mode=queue
+POST /api/session/list      读所有会话状态，含 turns 与 running
+POST /api/session/page      读某个会话的具体消息
+POST /api/session/cancel    卡住时中止
+```
+
+都是 DSH 的一元 RPC，POST + cookie 鉴权，不需要流式通道。
+
+## 每个 Bot 用哪份技能包
+
+七份，写在 `skills-for-bots/`，通过 `apply-skills.mjs` 追加到对应 Bot 的 `instructions`。
+
+| Bot | 技能包 | 核心规则 | 字数 |
+|---|---|---|---|
+| Chief | `chief.md` | 接单三步、验收四问、退回标准、汇报口径 | 645 |
+| 小研 | `xiaoyan.md` | 检索留痕、核验四种结论、判定优先级、工具自证 | 805 |
+| 选题 | `xuanti.md` | 问题四关、五维体检、新颖性判定、致命缺陷审计 | 767 |
+| 实验 | `shiyan.md` | 五要素、可复现四件套、四类陷阱、负结果处理 | 739 |
+| 写作 | `xiezuo.md` | 每句有归属、段落骨架、避免的写法、待补证据清单 | 682 |
+| 图表 | `tubiao.md` | 图型选择表、四个必查错误、配色、三条交付件 | 837 |
+| 审稿 | `shengao.md` | 独立性、五道检查、CRITICAL/MAJOR/MINOR 分级 | 757 |
+
+小智（日常助理）不分配科研技能包。
+
+技能包不是提示词模板，是从实际事故里提炼的。比如小研那份里「DOI 返回 responseCode=2 是连接失败，100 才是 handle 不存在」——不区分这两者，会把服务故障误报成假文献。
+
+审稿那份已经用真实任务验证过：给它一份表格做格式自检，输出是 0 CRITICAL / 4 MAJOR / 13 MINOR，十七条全部按「位置 + 问题 + 为什么是问题 + 最小修改」四段式写，四项检查逐项给结论。
+
 ## 需要装什么
 
 ### Zotero 侧
@@ -151,6 +210,8 @@ node limbs/dispatch.mjs --task T2026... --via room
 `--via room` 把任务投进科研群聊，负责人接单、派活、验收。`--via bot` 直接投给负责人私聊，不占群聊版面。
 
 详细设计、依赖版本、重建步骤见 [limbs/ARCHITECTURE.md](limbs/ARCHITECTURE.md)。
+
+**如果你想让另一个 AI 帮你复刻这套东西**，把这个仓库地址和 [REPLICATE.md](REPLICATE.md) 一起发给它。那份文件是写给 AI 看的：七步、每步带验证命令、失败对照表。
 
 ## 局限
 
