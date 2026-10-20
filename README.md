@@ -4,6 +4,8 @@
 
 大脑用什么不重要——Claude Code、Cursor、Codex、你自己写的 runner 都行，只要它能执行命令。
 
+> 当前版本 `1.0.0`。核心接口向后兼容。变更记录 [CHANGELOG.md](CHANGELOG.md)，维护规矩 [MAINTENANCE.md](MAINTENANCE.md)。
+
 ![从任务单到团队协作再到产物](assets/demo.gif)
 
 ---
@@ -239,6 +241,8 @@ limbs/audit.mjs          统一审计日志
 ```
 
 完整清单与设计约束见 [limbs/README.md](limbs/README.md) 和 [limbs/ARCHITECTURE.md](limbs/ARCHITECTURE.md)。十一条设计决策（含错误更正）见 [docs/adr.md](docs/adr.md)。
+
+版本演进见 [CHANGELOG.md](CHANGELOG.md)，改动与发版规矩见 [MAINTENANCE.md](MAINTENANCE.md)，给 AI 的复刻步骤见 [REPLICATE.md](REPLICATE.md)。
 
 ## 许可
 
