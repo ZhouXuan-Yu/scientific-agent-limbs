@@ -23,7 +23,7 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_MODEL,
 } from "../DSH-Desktop-Bridge/bin/dsh-core.mjs";
-import { load, setState, render, patchTask } from "./tasks.mjs";
+import { load, setState, render, patchTask, list } from "./tasks.mjs";
 import { audit } from "./audit.mjs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -76,6 +76,23 @@ if (task.state !== "queued" && task.state !== "dispatched") {
  * 要真的重发就显式 --force。 */
 const GUARD_MS = 5 * 60 * 1000;
 const force = process.argv.includes("--force");
+
+// 串行门禁：同一时间只允许一个在跑的任务。
+// 多任务并行时群聊只有一个，条目会混在一起，分不清哪句属于哪个任务（2026-10-19 真发生过）。
+if (!force) {
+  const active = list().filter(
+    (t) => t.id !== taskId && ["dispatched", "running"].includes(t.state),
+  );
+  if (active.length) {
+    out({
+      error: "another task is still active; refusing to dispatch in parallel",
+      activeTasks: active.map((t) => ({ id: t.id, state: t.state, title: t.title })),
+      why: "群聊只有一个，并行任务的消息会混在一起，无法归属",
+      hint: "wait for them to finish, or pass --force if you accept the mixing",
+    });
+    process.exit(2);
+  }
+}
 if (!force && task.lastDispatchedAt) {
   const since = Date.now() - new Date(task.lastDispatchedAt).getTime();
   if (since >= 0 && since < GUARD_MS) {
@@ -146,7 +163,9 @@ if (via === "room" || via === "bot") {
   // 2026-10-19 实测：只写「读文件并执行」，它真的独干了，团队里没有痕迹。
   const teamLine =
     `这是团队任务，请按团队规则处理：判断由谁执行最合适，说明分工理由；` +
-    `需要分派时交给对应成员，不需分派则说明理由。不要无说明地全部自己做。`;
+    `需要分派时交给对应成员，不需分派则说明理由。不要无说明地全部自己做。\n\n` +
+    `群聊里可能同时有多个任务在进行。**每次在群里发言请以 [${taskId}] 开头**，` +
+    `包括派单、中间汇报和最终结果，否则消息归属不清。`;
   const brief =
     via === "room"
       ? `[任务单 ${taskId}] ${task.title}\n\n目标：${task.goal}\n\n验收标准：\n` +
@@ -178,7 +197,10 @@ if (via === "room" || via === "bot") {
       pollMs: 5000,
       artifactDir: botOutDir,
     });
-    roomEntries = q.entries || [];
+    // 按任务号归属：带本任务号的条目是明确的，不带的只能标为未归属等人工判断。
+    const allEntries = q.entries || [];
+    roomEntries = allEntries.filter((e) => String(e.text || "").includes(taskId));
+    const unassigned = allEntries.filter((e) => !String(e.text || "").includes(taskId));
     // 群聊只记录公开发言；成员私下完成的工作在自己的 session 里。
     // 不把这一层收回来，审查环节就整段丢失（2026-10-19 真实发生）。
     try {
@@ -250,7 +272,7 @@ if (via === "room" || via === "bot") {
     turn: botHit.turn,
     elapsedMs: botElapsed,
     text: botHit.text,
-    ...(isRoom ? { roomEntries, memberMessages } : {}),
+    ...(isRoom ? { roomEntries, unassignedEntries: unassigned, memberMessages } : {}),
     botOutDir,
     recoveredFiles,
     next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",
