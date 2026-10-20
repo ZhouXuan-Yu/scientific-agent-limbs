@@ -187,6 +187,7 @@ if (via === "room" || via === "bot") {
   let botHit = null;
   let roomEntries = [];
   let memberMessages = [];
+  let unassigned = [];
 
   if (isRoom) {
     // 团队任务有多轮：接单、派单、成员执行、复核。
@@ -200,7 +201,7 @@ if (via === "room" || via === "bot") {
     // 按任务号归属：带本任务号的条目是明确的，不带的只能标为未归属等人工判断。
     const allEntries = q.entries || [];
     roomEntries = allEntries.filter((e) => String(e.text || "").includes(taskId));
-    const unassigned = allEntries.filter((e) => !String(e.text || "").includes(taskId));
+    unassigned = allEntries.filter((e) => !String(e.text || "").includes(taskId));
     // 群聊只记录公开发言；成员私下完成的工作在自己的 session 里。
     // 不把这一层收回来，审查环节就整段丢失（2026-10-19 真实发生）。
     try {
