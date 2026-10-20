@@ -122,32 +122,116 @@ export async function memberReplies(roomId, { maxMessages = 6, textLimit = 3000 
 }
 
 /**
- * 等到群聊日志安静：连续 quietMs 无新增，或总超时。
- * 团队任务有多轮（接单 / 派单 / 执行 / 复核），等第一轮 turn/end 会漏掉大半。
+ * 等到系统真正静止（ADR-011）。
+ *
+ * 三个信号源同时不动才算完：
+ *   1. 群聊 seq（公开通道）
+ *   2. 成员 session 的 turns 总和（私下工作，群聊里看不到）
+ *   3. 产物目录的 mtime+size 摘要（是否已落盘）
+ * 任一变化则重置计时；全部不变且连续 quietMs，才返回。
+ *
+ * 依据：分布式终止检测（Dijkstra & Scholten 1980）的条件是「所有进程 passive 且所有通道为空」。
+ * 只看通道（群聊）漏掉私下工作，只看进程（running）漏掉产物落盘。
  */
-export async function waitQuiet(roomId, sinceSeq, { quietMs = 90000, timeoutMs = 900000, pollMs = 5000 } = {}) {
+export async function waitQuiet(roomId, sinceSeq, { quietMs = 90000, timeoutMs = 900000, pollMs = 5000, artifactDir = null } = {}) {
   const start = Date.now();
-  let lastSeq = sinceSeq;
+  let lastSignal = null;
   let lastChange = Date.now();
+  let first = true;
+
+  const { readdirSync, statSync } = await import("node:fs");
+
+  function artifactDigest() {
+    if (!artifactDir) return "none";
+    try {
+      const parts = [];
+      const walk = (dir, prefix) => {
+        for (const name of readdirSync(dir)) {
+          const full = `${dir}/${name}`;
+          let st;
+          try {
+            st = statSync(full);
+          } catch {
+            continue;
+          }
+          if (st.isDirectory()) {
+            if (name === "fulltext") continue; // 材料目录不算产物
+            walk(full, `${prefix}${name}/`);
+          } else {
+            parts.push(`${prefix}${name}:${st.size}:${st.mtimeMs}`);
+          }
+        }
+      };
+      walk(artifactDir, "");
+      return parts.sort().join("|");
+    } catch {
+      return "unreadable";
+    }
+  }
+
+  async function memberTurnSum() {
+    try {
+      const room = roomState(roomId);
+      const hidden = Object.values(room.sessions || {});
+      if (!hidden.length) return 0;
+      const mod = await import("../DSH-Desktop-Bridge/bin/dsh-core.mjs");
+      const list = await mod.rpc("session/list", { _request: {} });
+      const items = list.items || [];
+      let sum = 0;
+      let running = 0;
+      for (const sid of hidden) {
+        const it = items.find((s) => s.sessionId === sid);
+        if (!it) continue;
+        sum += it.projections?.values?.sessionStats?.turns ?? 0;
+        if (it.running) running++;
+      }
+      return { sum, running };
+    } catch {
+      return { sum: -1, running: 0 };
+    }
+  }
 
   while (Date.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, pollMs));
-    let cur;
+
+    let seq;
     try {
-      cur = roomState(roomId).seq;
+      seq = roomState(roomId).seq;
     } catch {
-      continue; // 文件正在被写时可能读到半截，下一轮再试
+      continue; // 文件可能正被写，下一轮再试
     }
-    if (cur !== lastSeq) {
-      lastSeq = cur;
+    const mt = await memberTurnSum();
+    const art = artifactDigest();
+    const signal = `${seq}|${mt.sum}|${mt.running}|${art}`;
+
+    if (first || signal !== lastSignal) {
+      first = false;
+      lastSignal = signal;
+      lastChange = Date.now();
+      continue;
+    }
+    // 信号未变，还要确认没有 session 在跑（进程 passive）
+    if (mt.running > 0) {
       lastChange = Date.now();
       continue;
     }
     if (Date.now() - lastChange >= quietMs) {
-      return { quiet: true, seq: lastSeq, waitedMs: Date.now() - start, entries: roomDelta(roomId, sinceSeq) };
+      return {
+        quiet: true,
+        seq,
+        memberTurns: mt.sum,
+        waitedMs: Date.now() - start,
+        entries: roomDelta(roomId, sinceSeq),
+      };
     }
   }
-  return { quiet: false, seq: lastSeq, waitedMs: Date.now() - start, entries: roomDelta(roomId, sinceSeq) };
+  return {
+    quiet: false,
+    seq: lastSignal ? Number(String(lastSignal).split("|")[0]) : null,
+    memberTurns: null,
+    waitedMs: Date.now() - start,
+    entries: roomDelta(roomId, sinceSeq),
+  };
 }
 
 const invoked = process.argv[1] ? process.argv[1].replace(/\\/g, "/") : "";
