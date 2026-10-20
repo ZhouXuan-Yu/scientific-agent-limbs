@@ -200,7 +200,25 @@ node limbs/refs.mjs status   # 文献回链
 | L5.1 审计 | 六个动作已接入 | `audit.mjs stats` |
 | L5.2 故障注入 | 13 项全过，含版本冲突 412 与对照组 | `test-failure.mjs` |
 
-## 十一、这份体系里没有的东西
+## 十一、发布流程
+
+本地工作区与公开仓库是两处。每次迭代必须推到远端，不能只停在本地提交。
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File limbs\release.ps1 -Message "feat: ..."
+```
+
+这一句做三件事：按 `build-repo.ps1` 把源文件复制进 `_repo/scientific-agent-limbs`，提交，推送到 `origin main`。
+
+三条约束：
+
+1. **推送失败不能说完成。** 先诊断网络（TLS / 代理 / DNS），再重试。本地提交不等于已发布。
+2. **只复制列入 `build-repo.ps1` 的文件。** 新增模块必须加进那个列表，否则仓库里会缺文件而本地看不出来。
+3. **`config.json`、`_audit/`、`tasks/T*` 永不入库。** `.gitignore` 已拦，新增敏感路径时同步更新它。
+
+发布后核一件事：`git ls-tree -r --name-only origin/main` 里能看到刚才改的文件。看不到就是没推上去。
+
+## 十二、这份体系里没有的东西
 
 说清楚边界同样重要：
 
