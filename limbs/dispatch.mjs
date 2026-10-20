@@ -29,7 +29,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { config } from "./config.mjs";
 import { turnEnds } from "./events.mjs";
-import { roomState, waitQuiet } from "./botstate.mjs";
+import { roomState, waitQuiet, memberReplies } from "./botstate.mjs";
 
 function arg(name, dflt) {
   for (const flag of [`--${name}`, `-${name}`]) {
@@ -167,19 +167,27 @@ if (via === "room" || via === "bot") {
 
   let botHit = null;
   let roomEntries = [];
+  let memberMessages = [];
 
   if (isRoom) {
     // 团队任务有多轮：接单、派单、成员执行、复核。
     // 等第一个 turn/end 只能捕到开头，所以改成等「群聊安静」。
     const q = await waitQuiet(room, roomSince, { quietMs: 90000, timeoutMs: timeoutSec * 1000 });
     roomEntries = q.entries || [];
+    // 群聊只记录公开发言；成员私下完成的工作在自己的 session 里。
+    // 不把这一层收回来，审查环节就整段丢失（2026-10-19 真实发生）。
+    try {
+      memberMessages = await memberReplies(room);
+    } catch (ex) {
+      audit("dispatch", "member-replies-failed", { target: taskId, ok: false, error: String(ex?.message || ex) });
+    }
     botHit = {
       turn: null,
       at: new Date().toISOString(),
       quiet: q.quiet,
       text: q.quiet
-        ? `room settled after ${q.waitedMs}ms, ${roomEntries.length} new entries`
-        : `room still active after ${q.waitedMs}ms, ${roomEntries.length} new entries`,
+        ? `room settled after ${q.waitedMs}ms, ${roomEntries.length} new entries, ${memberMessages.length} member replies collected`
+        : `room still active after ${q.waitedMs}ms, ${roomEntries.length} new entries, ${memberMessages.length} member replies collected`,
     };
   } else {
     const botDeadline = Date.now() + timeoutSec * 1000;
@@ -237,7 +245,7 @@ if (via === "room" || via === "bot") {
     turn: botHit.turn,
     elapsedMs: botElapsed,
     text: botHit.text,
-    ...(isRoom ? { roomEntries } : {}),
+    ...(isRoom ? { roomEntries, memberMessages } : {}),
     botOutDir,
     recoveredFiles,
     next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",

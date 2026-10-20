@@ -50,6 +50,8 @@ export function roomState(roomId) {
     mode: r.mode,
     notice: r.notice || null,
     members: r.members || [],
+    // 成员主 session → 群内隐藏 session 的映射。漏了它，memberReplies 就什么都读不到。
+    sessions: r.sessions || {},
     seq: r.seq || 0,
     log: r.log || [],
   };
@@ -64,6 +66,59 @@ export function roomDelta(roomId, sinceSeq) {
     botId: e.botId || null,
     text: String(e.text || ""),
   }));
+}
+
+/**
+ * 收集群内各成员自己 session 的最新一条助手回复。
+ *
+ * 为什么要这个：群聊 log 只记录「在群里说的话」。Bot 之间的私下协作不进 log。
+ * 2026-10-19 实测：审稿完成了 16 步的完整抽查（含 4 条 MAJOR 意见），
+ * 回复就在它自己的 session 里，群聊 seq 停在 Chief 最后一句。只看 log 会漏掉整个审查环节。
+ */
+export async function memberReplies(roomId, { maxMessages = 6, textLimit = 3000 } = {}) {
+  const room = roomState(roomId);
+  const hidden = room.sessions || {};
+  if (!Object.keys(hidden).length) return [];
+
+  const mod = await import("../DSH-Desktop-Bridge/bin/dsh-core.mjs");
+  const list = await mod.rpc("session/list", { _request: {} });
+  const items = list.items || [];
+
+  const out = [];
+  for (const [mainSid, hiddenSid] of Object.entries(hidden)) {
+    const it = items.find((s) => s.sessionId === hiddenSid);
+    if (!it?.projections?.asOfSeq) continue;
+    try {
+      const page = await mod.rpc("session/page", {
+        request: {
+          address: { kind: "session", sessionId: hiddenSid },
+          throughSeq: it.projections.asOfSeq,
+          maxMessages,
+        },
+      });
+      const msgs = (page.records || [])
+        .map((z) => z.event)
+        .filter((e) => e && e.type === "assistant/message");
+      const last = msgs[msgs.length - 1];
+      if (!last) continue;
+      const text = (last.data?.message?.content || [])
+        .filter((c) => c.type === "text")
+        .map((c) => c.text)
+        .join("\n");
+      if (!text.trim()) continue;
+      out.push({
+        sessionId: hiddenSid,
+        mainSession: mainSid,
+        title: it.projections.values?.title || null,
+        turns: it.projections.values?.sessionStats?.turns ?? null,
+        chars: text.length,
+        text: text.slice(0, textLimit),
+      });
+    } catch {
+      /* 单个成员读失败不影响其他的 */
+    }
+  }
+  return out;
 }
 
 /**
