@@ -33,6 +33,23 @@ node "$L\probe.mjs"          # 往 Chief 发一条探针，看通道通不通
 node "$L\zotero-core.mjs"    # 无参数=ping，返回版本、条目数
 ```
 
+**然后必查僵尸任务。**这是最容易把人卡住的地方：
+
+```powershell
+node "$L\tasks.mjs" list | Select-String "running"
+node "$L\daemon.mjs" --once --max-cycles 1      # 会列出 pendingReview
+```
+
+群里已跑完但没验收的任务、或中途断掉的任务，会一直停在 `running`，把串行门禁锁死，之后所有 dispatch 都报 `another task is still active`。
+
+处理办法，按顺序试：
+
+1. `tasks.mjs show <ID>` 看产物是否齐全。齐全就 `set <ID> --state done --sync` 结单。
+2. 产物不全但确实要放弃：`set <ID> --state cancelled`。
+3. 确实还在跑（`dsh_list` 里对应 session 的 running 为 true）：等它。
+
+注意状态机不能跳级：`queued` 不能直接置 `done`，只能 `cancelled`；要置 `done` 必须先经过 `dispatched` 或 `running`。
+
 Zotero 没起会自动拉起（最长 90 秒）。仍失败的话，检查 Zotero 设置 → 高级 → 勾选「Allow other applications on this computer to communicate with Zotero」。
 
 ## 六个标准动作
@@ -112,6 +129,11 @@ node "$L\dispatch.mjs" --task <ID> --via room --text-file prompt.txt
 ```powershell
 node "$L\wait-turn.mjs" --session session-3284d835-7582-4707-9e00-d91c0c428bcb --timeout 1800
 ```
+
+**群聊投递拿不到回执，这是必然的。**实测结论：无论是 MCP 的 `dsh_send`、bridge 的 `dsh.mjs send`，还是直接调 DSH 接口，往群聊投递后返回的 `text` 都是空字符串，`dsh_read` 也读不到。原因不是通道坏了——群聊不把成员发言写进 session 的 assistant message，而是写进 room 的 log。所以：
+
+- **投递成功 ≠ 拿到回复**。返回空字符串只说明消息进了队列。
+- 要确认是否真收到，只能查 room log 或 inbox。
 
 看收件箱（所有 Bot 的回复汇总）：
 
@@ -222,6 +244,26 @@ for (const it of col.json) {
 ```
 
 报数时分开写「有全文」和「只有条目」，不要合并成一个数字。
+
+## 通道对比：四条路各管什么
+
+实测过四条通道，用途不同，不要混用：
+
+| 通道 | 能做什么 | 拿得到回复吗 | 适合什么 |
+|---|---|---|---|
+| **limbs dispatch** | 建单、投递、等、回收产物、改状态 | 能，有三信号判定和产物清单 | **正式任务，默认用这个** |
+| **MCP `dsh_send`** | 直接投消息到指定 session | 私聊能，群聊不能（返回空） | 临时问一句、测通道 |
+| **bridge `dsh.mjs send`** | 同上，命令行版 | 同上 | 不想装 MCP 时用 |
+| **`dshana` app** | 起一个 DSH 子智能体 | 能 | 需要独立上下文的一次性任务 |
+
+**关键差异**：limbs 会等你到真正完成（三信号静止 90 秒）并回收产物；MCP 和 bridge 只保证消息进了队列。要结果必须自己查 room log。
+
+往群聊投递后，验证方式：
+
+```powershell
+node "$L\botstate.mjs" room          # 看 seq 有没有涨
+node "$L\botstate.mjs" log           # 看最后几条是谁说的什么
+```
 
 ## 失败处理
 
