@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { config } from "./config.mjs";
 import { turnEnds } from "./events.mjs";
 import { roomState, waitQuiet, memberReplies } from "./botstate.mjs";
+import { snapshotDir, diffSnapshot, recoverChanged } from "./artifact-sweep.mjs";
 
 function arg(name, dflt) {
   for (const flag of [`--${name}`, `-${name}`]) {
@@ -50,6 +51,12 @@ function maxTurn(sid) {
   for (const e of turnEnds({ sessions: [sid] })) m = Math.max(m, Number(e.turn) || 0);
   return m;
 }
+
+/* ── 产物回收：投递前给 Bot 工作区拍快照，完成后 diff 自动搬运 ──────────────
+ * 2026-10-26 实测：团队经常把成果写进自己工作区的 research/ 或别的目录，
+ * 而不是任务单指定的 tasks/<id>/，结果 tasks show 看不到、sync 收不到，
+ * 外部看起来像「跑了两小时什么都没产出」。
+ * 实现见 artifact-sweep.mjs，这里只管调用。 */
 
 const taskId = arg("task");
 if (!taskId || taskId === true) {
@@ -157,6 +164,8 @@ if (via === "room" || via === "bot") {
   const isRoom = via === "room";
   // 投递前记下群聊 seq，用于判断这期间团队新增了哪些条目。
   const roomSince = isRoom ? roomState(room).seq : 0;
+  // 投递前给整个 Bot 工作区拍快照，完成后靠 diff 找回写错位置的产物。
+  const snapshotBefore = snapshotDir(botWs);
 
   const chiefBaseline = maxTurn(chief);
   // 团队分派是显式要求：不写清楚，Chief 会自己一个人干完。
@@ -247,14 +256,30 @@ if (via === "room" || via === "bot") {
   // 回收：Bot 写在自己的 workspace，得搬回工作区任务目录，否则 sync 扫不到。
   let recoveredFiles = 0;
   const localDir = join(config().paths.tasks, taskId);
+  mkdirSync(localDir, { recursive: true });
   if (existsSync(botOutDir)) {
-    mkdirSync(localDir, { recursive: true });
     try {
       cpSync(botOutDir, localDir, { recursive: true, force: true });
       recoveredFiles = readdirSync(localDir, { withFileTypes: true }).filter((d) => d.isFile()).length;
     } catch (ex) {
       audit("dispatch", "recover-failed", { target: taskId, ok: false, error: String(ex?.message || ex) });
     }
+  }
+  // 再扫一遍整个工作区，把写到别处的新文件也捞回来。
+  let sweptFiles = [];
+  let sweepFailed = [];
+  try {
+    const r = recoverChanged(botWs, localDir, diffSnapshot(snapshotBefore, snapshotDir(botWs)), taskId);
+    sweptFiles = r.copied;
+    sweepFailed = r.failed;
+    for (const f of sweepFailed) {
+      audit("dispatch", "recover-file-failed", { target: taskId, ok: false, error: f });
+    }
+  } catch (ex) {
+    audit("dispatch", "sweep-failed", { target: taskId, ok: false, error: String(ex?.message || ex) });
+  }
+  if (sweptFiles.length) {
+    audit("dispatch", "swept-artifacts", { target: taskId, ok: true, detail: { count: sweptFiles.length, files: sweptFiles.slice(0, 20) } });
   }
 
   setState(taskId, "running", { sessionId: chief, note: `bot turn ${botHit.turn} completed in ${botElapsed}ms` });
@@ -276,6 +301,8 @@ if (via === "room" || via === "bot") {
     ...(isRoom ? { roomEntries, unassignedEntries: unassigned, memberMessages } : {}),
     botOutDir,
     recoveredFiles,
+    sweptFiles,
+    ...(sweepFailed.length ? { sweepFailed } : {}),
     next: "逐条核对验收标准后，用 tasks.mjs set --state done --sync 结单",
   });
   process.exit(0);

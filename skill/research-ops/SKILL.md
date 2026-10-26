@@ -162,14 +162,16 @@ node "$L\tasks.mjs" show <ID>          # 任务详情 + 产物清单
 node "$L\tasks.mjs" verify <ID>        # 自动核验收标准
 ```
 
-**先确认产物到底在哪。** 实测踩过的坑：团队经常把成果写到自己工作区的 `research/` 下，而不是任务的 `tasks/<ID>/` 里，于是 `tasks show` 的产物清单是空的，`--sync` 也收不到东西，看着像没干活。两个位置都要查：
+**产物回收是自动的**（2026-10-26 实测通过）。dispatch 在投递前和完成后各给 Bot 工作区拍一次签名快照，diff 出新增与改动的文件，自动搬进 `OH-WorkSpace\tasks\<ID>\`，保留原有目录层级。所以团队把报告写到自己工作区的 `research/` 而不是任务目录，也能收回来。
 
-```powershell
-$W="C:\Users\ZhouXuan\AppData\Roaming\dsh-desktop\harness\bot\workspace"
-Get-ChildItem "$W\research" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15
-```
+返回里看两个字段：
 
-找回来后手动复制进 `OH-WorkSpace\tasks\<ID>\`，再结单。注意区分 `.orig.md`（原稿）和同名无后缀文件（修订版）：团队会保留原稿供追溯，验收要看修订版。
+- `recoveredFiles`：从任务目录搬回的顶层文件数
+- `sweptFiles`：从工作区其他位置扫回来的文件清单
+
+两者都为 0 才是真的没产出。若 `sweptFiles` 出现预期外的路径，说明团队写到别地了，仍可正常验收。
+
+注意区分 `.orig.md`（原稿）和同名无后缀文件（修订版）：团队会保留原稿供追溯，验收要看修订版。
 
 核完再结：
 
