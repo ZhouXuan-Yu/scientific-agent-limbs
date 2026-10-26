@@ -162,6 +162,15 @@ node "$L\tasks.mjs" show <ID>          # 任务详情 + 产物清单
 node "$L\tasks.mjs" verify <ID>        # 自动核验收标准
 ```
 
+**先确认产物到底在哪。** 实测踩过的坑：团队经常把成果写到自己工作区的 `research/` 下，而不是任务的 `tasks/<ID>/` 里，于是 `tasks show` 的产物清单是空的，`--sync` 也收不到东西，看着像没干活。两个位置都要查：
+
+```powershell
+$W="C:\Users\ZhouXuan\AppData\Roaming\dsh-desktop\harness\bot\workspace"
+Get-ChildItem "$W\research" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 15
+```
+
+找回来后手动复制进 `OH-WorkSpace\tasks\<ID>\`，再结单。注意区分 `.orig.md`（原稿）和同名无后缀文件（修订版）：团队会保留原稿供追溯，验收要看修订版。
+
 核完再结：
 
 ```powershell
